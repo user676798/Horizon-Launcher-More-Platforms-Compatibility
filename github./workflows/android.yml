@@ -1,0 +1,57 @@
+name: Android build
+
+# Se ejecuta a mano: pestaña Actions > "Android build" > Run workflow
+on:
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Instalar cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Compilar horizon-client para Android (arm64)
+        shell: bash
+        run: |
+          set -o pipefail
+          # Los runners de GitHub ya traen el NDK de Android
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          # --keep-going: sigue compilando otros crates para ver TODOS los errores de una vez
+          # --profile fast: perfil que ya existe en el Cargo.toml del proyecto (build más rápido)
+          cargo ndk -t arm64-v8a build --profile fast --keep-going -p horizon-client 2>&1 | tee build.log
+
+      - name: Resumen de errores
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Errores de compilación'
+            echo '```'
+            grep -E -A8 '^error' build.log | head -300 || echo "Sin errores"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar log completo
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+
+      - name: Guardar librerías compiladas
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-arm64
+          path: target/aarch64-linux-android/fast/
+          if-no-files-found: warn
